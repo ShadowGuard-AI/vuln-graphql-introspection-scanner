@@ -21,6 +21,9 @@ def setup_argparse():
     parser.add_argument("-d", "--depth", type=int, default=3, help="Set the max depth for the schema introspection.")
     return parser
 
+# Depth is clamped here instead of rejected: main stops anything under 1,
+# but a depth of 50 quietly becomes 10. The query stays bounded either way,
+# and a wrapped type deeper than ten levels just comes back truncated.
 def build_typeref_fragment(depth: int) -> str:
     """Builds the TypeRef fragment with exactly depth levels of ofType nesting."""
     depth = max(1, min(int(depth), 10))
@@ -107,6 +110,10 @@ def introspect_graphql_schema(url: str, depth: int = 3) -> dict | None:
         response = requests.post(url, json={'query': query}, timeout=10)  # Added timeout
         response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
         data = response.json()
+        # Any errors key at all ends this, even when the same response also
+        # carries a usable data block. GraphQL allows partial data beside
+        # errors; I treat a partial schema as no schema rather than grade
+        # half of an API surface.
         if 'errors' in data:
             logging.error(f"GraphQL introspection query failed: {data['errors']}")
             return None
@@ -146,6 +153,9 @@ def analyze_schema(schema: dict) -> dict:
         for type_def in types:
             if type_def and 'fields' in type_def and type_def['fields']:
                 for field in type_def['fields']:
+                    # Substring match on the field name only. Arguments and
+                    # input fields are never scanned, and a type named
+                    # SecretStore with plain fields draws no finding.
                     if field and field['name'] and ('password' in field['name'].lower() or 'email' in field['name'].lower() or 'secret' in field['name'].lower()):
                         sensitive_fields.append({
                             'type': type_def['name'],
@@ -200,6 +210,9 @@ def main():
                     json.dump(schema, outfile, indent=4)
                 logging.info(f"Schema saved to: {args.output}")
 
+                # The findings file only exists in output mode, named by
+                # appending to the schema path. In console mode the same
+                # findings are printed under the schema instead.
                 if vulnerabilities:
                   with open(args.output + ".vulns.json", 'w') as outfile:
                     json.dump(vulnerabilities, outfile, indent=4)
