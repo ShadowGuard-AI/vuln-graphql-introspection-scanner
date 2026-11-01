@@ -21,6 +21,15 @@ def setup_argparse():
     parser.add_argument("-d", "--depth", type=int, default=3, help="Set the max depth for the schema introspection.")
     return parser
 
+def build_typeref_fragment(depth: int) -> str:
+    """Builds the TypeRef fragment with exactly depth levels of ofType nesting."""
+    depth = max(1, min(int(depth), 10))
+    inner = "kind\n      name"
+    for _ in range(depth):
+        inner = "kind\n      name\n      ofType {\n        " + inner + "\n      }"
+    return "fragment TypeRef on __Type {\n      " + inner + "\n    }"
+
+
 def introspect_graphql_schema(url: str, depth: int = 3) -> dict | None:
     """
     Performs a GraphQL introspection query to retrieve the schema.
@@ -32,6 +41,7 @@ def introspect_graphql_schema(url: str, depth: int = 3) -> dict | None:
     Returns:
         dict | None: The GraphQL schema as a dictionary, or None if an error occurred.
     """
+    typeref_fragment = build_typeref_fragment(depth)
     query = """
     query IntrospectionQuery {
       __schema {
@@ -92,35 +102,7 @@ def introspect_graphql_schema(url: str, depth: int = 3) -> dict | None:
       defaultValue
     }
 
-    fragment TypeRef on __Type {
-      kind
-      name
-      ofType {
-        kind
-        name
-        ofType {
-          kind
-          name
-          ofType {
-            kind
-            name
-            ofType {
-              kind
-              name
-              ofType {
-                kind
-                name
-                ofType {
-                  kind
-                  name
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    """
+    """ + "\n    " + typeref_fragment + "\n"
     try:
         response = requests.post(url, json={'query': query}, timeout=10)  # Added timeout
         response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
@@ -154,9 +136,14 @@ def analyze_schema(schema: dict) -> dict:
   vulnerabilities = {}
   if schema:
         logging.info("Schema retrieved successfully. Starting analysis...")
+        types = schema.get('types')
+        if not isinstance(types, list):
+            logging.warning("Malformed schema: 'types' is missing or is not a list. Analysis skipped.")
+            vulnerabilities['malformed_schema'] = "Schema has no usable 'types' list."
+            return vulnerabilities
         # Check for sensitive fields (e.g., password, email, etc.)
         sensitive_fields = []
-        for type_def in schema['types']:
+        for type_def in types:
             if type_def and 'fields' in type_def and type_def['fields']:
                 for field in type_def['fields']:
                     if field and field['name'] and ('password' in field['name'].lower() or 'email' in field['name'].lower() or 'secret' in field['name'].lower()):
@@ -193,7 +180,15 @@ def main():
         logging.error("Invalid URL. Please provide a URL starting with http:// or https://")
         sys.exit(1)
 
+    if args.depth < 1:
+        logging.error("Invalid depth. Depth must be at least 1.")
+        sys.exit(1)
+
     schema = introspect_graphql_schema(args.url, args.depth)
+
+    if schema and not isinstance(schema.get('types'), list):
+        logging.error("Malformed schema: the endpoint returned a schema with no 'types' list. No analysis was performed.")
+        sys.exit(1)
 
     if schema:
         # Analyze the schema for vulnerabilities

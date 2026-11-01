@@ -11,7 +11,7 @@ Attempts to retrieve the GraphQL schema from a target endpoint to identify poten
 - `-h`: Show help message and exit
 - `-o`: No description provided
 - `-v`: Enable verbose logging.
-- `-d`: Set the max depth for the schema introspection.
+- `-d`: Set the max depth for the schema introspection. The depth controls how many levels of nested `ofType` the TypeRef fragment in the introspection query expands (1 to 10).
 
 ## License
 Copyright (c) ShadowStrikeHQ
