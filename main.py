@@ -156,10 +156,13 @@ def analyze_schema(schema: dict) -> dict:
                     # Substring match on the field name only. Arguments and
                     # input fields are never scanned, and a type named
                     # SecretStore with plain fields draws no finding.
-                    if field and field['name'] and ('password' in field['name'].lower() or 'email' in field['name'].lower() or 'secret' in field['name'].lower()):
+                    # A field entry with no name key is skipped instead of
+                    # crashing the whole scan with a KeyError.
+                    field_name = field.get('name') if isinstance(field, dict) else None
+                    if field_name and ('password' in field_name.lower() or 'email' in field_name.lower() or 'secret' in field_name.lower()):
                         sensitive_fields.append({
-                            'type': type_def['name'],
-                            'field': field['name']
+                            'type': type_def.get('name'),
+                            'field': field_name
                         })
         if sensitive_fields:
           vulnerabilities['sensitive_fields'] = sensitive_fields
@@ -196,7 +199,7 @@ def main():
 
     schema = introspect_graphql_schema(args.url, args.depth)
 
-    if schema and not isinstance(schema.get('types'), list):
+    if schema and (not isinstance(schema, dict) or not isinstance(schema.get('types'), list)):
         logging.error("Malformed schema: the endpoint returned a schema with no 'types' list. No analysis was performed.")
         sys.exit(1)
 
